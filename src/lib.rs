@@ -10,36 +10,73 @@
 #![allow(clippy::enum_glob_use)]
 #![allow(clippy::match_same_arms)]
 
-use std::collections::HashSet;
+use std::collections::HashMap;
 
-// #[derive(PartialEq, Eq, Clone)]
+#[derive(PartialEq, Eq)] // default deep equality
 enum Shape {
     Bottom,
     Any(AnyShape),
     Bool,
     Int,
     Float,
-    Rec,  // Records
-    Coll, // Collections
-    Str,  // Strings
+    Rec(RecordShape),      // Records
+    Coll(CollectionShape), // Collections
+    Str,                   // Strings
     Null,
-    NullAny(AnyShape),
     NullBool,
     NullInt,
     NullFloat,
     NullRec,
-    NullColl,
     NullStr,
 }
 
 /// ----tag-----| --- data ------
 ///    1        |  HashSet
 
+#[derive(PartialEq, Eq)] // default deep equality
 struct AnyShape {
     /// The list of shapes that the Any Shape holds
     /// e.g. the type float | int --> shapes = [float, int]
-    shapes: HashSet<Shape>,
+    // shapes: HashSet<Shape>,
+    shapes: Vec<Shape>,
 }
+
+// s1, s2 : AnyShape
+
+#[derive(PartialEq, Eq)] // default deep equality
+struct RecordShape {
+    fields: HashMap<String, Shape>,
+    /// no idea
+    contexts: Vec<String>,
+}
+
+struct CollectionShape {
+    base: Box<Shape>, // Box<T> --> T is allocated on the heap
+    /// no idea
+    contexts: Vec<String>,
+}
+
+// https://doc.rust-lang.org/std/cmp/trait.PartialEq.html
+impl PartialEq for CollectionShape {
+    fn eq(&self, other: &Self) -> bool {
+        (*self.base).eq(&*other.base) // Box<T> -> T -> &T
+    }
+}
+
+// https://doc.rust-lang.org/std/cmp/trait.Eq.html
+// No implementation needed. When you do ==, it actually invokes PartialEq, not Eq.
+impl Eq for CollectionShape {}
+
+// If we just have Shape type, we would end up consuming (move semantics)
+fn common_preferred_shape(s1: &Shape, s2: &Shape) -> Shape {
+    if s1 == s2 {
+        return s1;
+    }
+    todo!();
+}
+
+// int --> Integer
+// 1   --> Box::new(1)
 
 /*
 
