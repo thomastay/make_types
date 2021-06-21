@@ -59,7 +59,7 @@ struct CollectionShape {
 // https://doc.rust-lang.org/std/cmp/trait.PartialEq.html
 impl PartialEq for CollectionShape {
     fn eq(&self, other: &Self) -> bool {
-        (*self.base).eq(&*other.base) // Box<T> -> T -> &T
+        (*self.base) == *other.base // Box<T> -> T -> &T
     }
 }
 
