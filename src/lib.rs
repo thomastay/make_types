@@ -12,7 +12,7 @@
 
 use std::collections::HashMap;
 
-#[derive(PartialEq, Eq)] // default deep equality
+#[derive(PartialEq, Eq, Clone)] // default deep equality
 enum Shape {
     Bottom,
     Any(AnyShape),
@@ -26,14 +26,43 @@ enum Shape {
     NullBool,
     NullInt,
     NullFloat,
-    NullRec,
+    NullRec(RecordShape),
     NullStr,
 }
 
-/// ----tag-----| --- data ------
-///    1        |  HashSet
+impl Shape {
+    fn make_nullable(&self) -> Self {
+        use Shape::*;
+        match self {
+            Bottom => Bottom,
+            Any(a) => Any(a.make_nullable()),
+            Bool => NullBool,
+            Int => NullInt,
+            Float => NullFloat,
+            Rec(r) => NullRec(r.clone()),
+            Coll(_) => todo!(), // TODO implement coll
+            Str => NullStr,
+            // returns the same
+            Null | NullBool | NullInt | NullFloat | NullStr | NullRec(_) => self.clone(),
+        }
+    }
+}
 
-#[derive(PartialEq, Eq)] // default deep equality
+// enum Shape2 {
+//     Bottom,
+//     Any(AnyShape),
+//     Bool(bool),
+//     Int(bool),
+//     Float(bool),
+//     Rec(RecordShape),      // Records
+//     Coll(CollectionShape), // Collections
+//     Str,                   // Strings
+// }
+
+/// ----tag-----| --- data ------
+///    1        |  `HashSet`
+
+#[derive(PartialEq, Eq, Clone)] // default deep equality
 struct AnyShape {
     /// The list of shapes that the Any Shape holds
     /// e.g. the type float | int --> shapes = [float, int]
@@ -41,24 +70,72 @@ struct AnyShape {
     shapes: Vec<Shape>,
 }
 
+impl AnyShape {
+    fn make_nullable(&self) -> Self {
+        let shapes = self
+            .shapes
+            .iter()
+            .map(|shape| shape.make_nullable())
+            .collect::<Vec<Shape>>();
+        AnyShape { shapes }
+    }
+}
+
 // s1, s2 : AnyShape
 
-#[derive(PartialEq, Eq)] // default deep equality
+#[derive(PartialEq, Eq, Clone)] // default deep equality
 struct RecordShape {
     fields: HashMap<String, Shape>,
     /// no idea
     contexts: Vec<String>,
 }
 
+#[derive(Clone)] // default deep equality
 struct CollectionShape {
     base: Box<Shape>, // Box<T> --> T is allocated on the heap
     /// no idea
     contexts: Vec<String>,
 }
 
+impl CollectionShape {
+    fn vedant() -> i32 {
+        5
+    }
+}
+
+// PartialEq is a trait
+
+// fn asd() {
+//     let x = CollectionShape {
+//         base: Box::new(Shape::Bottom), // box has a destructor
+//         contexts: Vec::new(),
+//     };
+//     // x.vedant();
+//     //x == x;
+//     // CollectionShape::vedant(&x);
+//     // int* base = malloc(sizeof(int));
+//     // auto x = CollectionShape { .base=base, .contexts=[] }
+//     // free(base);
+//     5.fuck_off();
+// }
+
+trait FuckOff {
+    fn fuck_off(&self) -> String;
+}
+
+impl FuckOff for i32 {
+    #[must_use]
+    fn fuck_off(&self) -> String {
+        // format!("")
+        format!("Fuck off {} times", self)
+    }
+}
+
 // https://doc.rust-lang.org/std/cmp/trait.PartialEq.html
 impl PartialEq for CollectionShape {
-    fn eq(&self, other: &Self) -> bool {
+    // &self is special --> keyword in Rust
+    // x.asds()  x--> &self.
+    fn eq(&self, other: &CollectionShape) -> bool {
         (*self.base) == *other.base // Box<T> -> T -> &T
     }
 }
@@ -69,10 +146,15 @@ impl Eq for CollectionShape {}
 
 // If we just have Shape type, we would end up consuming (move semantics)
 fn common_preferred_shape(s1: &Shape, s2: &Shape) -> Shape {
+    use Shape::*;
     if s1 == s2 {
-        return s1;
+        return s1.clone();
     }
-    todo!();
+    match (s1, s2) {
+        (Bottom, _) => s2.clone(),
+        (_, Bottom) => s1.clone(),
+        _ => todo!(), // TODO!
+    }
 }
 
 // int --> Integer
