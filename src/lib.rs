@@ -27,6 +27,7 @@ enum Shape {
     NullInt,
     NullFloat,
     NullRec(RecordShape),
+    NullColl(CollectionShape), // Collections
     NullStr,
 }
 
@@ -34,16 +35,41 @@ impl Shape {
     fn make_nullable(&self) -> Self {
         use Shape::*;
         match self {
-            Bottom => Bottom,
-            Any(a) => Any(a.make_nullable()),
+            Bottom => panic!("Bottom is sub class of null"),
+            Any(_) => self.clone(), // XXX: Expensive clone
             Bool => NullBool,
             Int => NullInt,
             Float => NullFloat,
             Rec(r) => NullRec(r.clone()),
-            Coll(_) => todo!(), // TODO implement coll
+            Coll(c) => NullColl(c.clone()),
             Str => NullStr,
             // returns the same
-            Null | NullBool | NullInt | NullFloat | NullStr | NullRec(_) => self.clone(),
+            Null | NullBool | NullInt | NullFloat | NullStr | NullRec(_) | NullColl(_) => {
+                self.clone()
+            }
+        }
+    }
+    fn make_non_nullable(&self) -> Self {
+        use Shape::*;
+        match self {
+            Bottom => panic!("Bottom is sub class of null"),
+            Null => panic!("Null is sub class of non-nullable"),
+            Any(_) => self.clone(), // XXX: Expensive clone
+            NullBool => Bool,
+            NullInt => Int,
+            NullFloat => Float,
+            NullRec(r) => Rec(r.clone()),
+            NullColl(c) => Coll(c.clone()),
+            NullStr => Str,
+            // returns the same
+            Bool | Int | Float | Str | Rec(_) | Coll(_) => self.clone(),
+        }
+    }
+    fn is_nullable(&self) -> bool {
+        use Shape::*;
+        match self {
+            Bottom | Any(_) | Bool | Int | Float | Rec(_) | Coll(_) | Str => false,
+            Null | NullBool | NullInt | NullFloat | NullStr | NullRec(_) | NullColl(_) => true,
         }
     }
 }
@@ -70,31 +96,31 @@ struct AnyShape {
     shapes: Vec<Shape>,
 }
 
-impl AnyShape {
-    fn make_nullable(&self) -> Self {
-        let shapes = self
-            .shapes
-            .iter()
-            .map(|shape| shape.make_nullable())
-            .collect::<Vec<Shape>>();
-        AnyShape { shapes }
-    }
-}
+// impl AnyShape {
+//     fn make_nullable(&self) -> Self {
+//         let shapes = self
+//             .shapes
+//             .iter()
+//             .map(Shape::make_nullable)
+//             .collect::<Vec<Shape>>();
+//         AnyShape { shapes }
+//     }
+// }
 
 // s1, s2 : AnyShape
 
 #[derive(PartialEq, Eq, Clone)] // default deep equality
 struct RecordShape {
     fields: HashMap<String, Shape>,
-    /// no idea
-    contexts: Vec<String>,
+    // no idea
+    // contexts: Vec<String>,
 }
 
 #[derive(Clone)] // default deep equality
 struct CollectionShape {
     base: Box<Shape>, // Box<T> --> T is allocated on the heap
-    /// no idea
-    contexts: Vec<String>,
+                      // no idea
+                      // contexts: Vec<String>,
 }
 
 impl CollectionShape {
@@ -144,8 +170,16 @@ impl PartialEq for CollectionShape {
 // No implementation needed. When you do ==, it actually invokes PartialEq, not Eq.
 impl Eq for CollectionShape {}
 
-// If we just have Shape type, we would end up consuming (move semantics)
+/// Creates a new Common Preferred Shape of s1 and s2, according to Fig 2 of the paper.
 fn common_preferred_shape(s1: &Shape, s2: &Shape) -> Shape {
+    fn new_any(a: &AnyShape, s: &Shape) -> Shape {
+        let mut shape_clones = a.shapes.clone();
+        shape_clones.push(s.clone());
+        Any(AnyShape {
+            shapes: shape_clones,
+        })
+    }
+
     use Shape::*;
     if s1 == s2 {
         return s1.clone();
@@ -153,7 +187,37 @@ fn common_preferred_shape(s1: &Shape, s2: &Shape) -> Shape {
     match (s1, s2) {
         (Bottom, _) => s2.clone(),
         (_, Bottom) => s1.clone(),
-        _ => todo!(), // TODO!
+        (Coll(c1), Coll(c2)) => Coll(CollectionShape {
+            base: Box::new(common_preferred_shape(&c1.base, &c2.base)),
+        }),
+        (Null, _) => s2.make_nullable(),
+        (_, Null) => s1.make_nullable(),
+        (Any(a1), _) => new_any(a1, s2),
+        (_, Any(a2)) => new_any(a2, s1),
+        (Rec(r1), Rec(r2)) => {
+            let mut fields: HashMap<String, Shape> = HashMap::new();
+            for (r1_field, r1_field_shape) in &r1.fields {
+                // Get the type of the field in r2, if it exists, else return the Null Shape
+                // Then, extract the CSH of both, and insert it into the fields map
+                let r2_field_shape = r2.fields.get(r1_field).unwrap_or(&Null);
+                fields.insert(
+                    r1_field.clone(),
+                    common_preferred_shape(r1_field_shape, r2_field_shape),
+                );
+            }
+            // TODO s2 Jul 17
+            Rec(RecordShape { fields })
+        }
+        _ => {
+            if s1.is_nullable() {
+                common_preferred_shape(&s1.make_non_nullable(), s2).make_nullable()
+            } else if s2.is_nullable() {
+                common_preferred_shape(s1, &s2.make_non_nullable()).make_nullable()
+            } else {
+                // TODO s2 Jul 17
+                todo!("Fill in Any");
+            }
+        }
     }
 }
 
